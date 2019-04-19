@@ -1,0 +1,47 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.configmap_etc }}
+{{- $envAll := . }}
+
+{{- if and (empty .Values.conf.grafana.database.url) (not (eq .Values.conf.grafana.database.type "sqlite3") ) -}}
+{{- $_ := tuple "oslo_db" "internal" "user" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | replace "mysql+pymysql://" "mysql://" | set .Values.conf.grafana.database "url" }}
+{{- end -}}
+
+{{- if empty .Values.conf.grafana.session.provider_config -}}
+{{- $user := .Values.endpoints.oslo_db_session.auth.user.username }}
+{{- $pass := .Values.endpoints.oslo_db_session.auth.user.password }}
+{{- $host_port := tuple "oslo_db_session" "internal" "mysql" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}
+{{- $path := .Values.endpoints.oslo_db_session.path }}
+{{- $_ := printf "%s:%s%s(%s)%s" $user $pass "@tcp" $host_port $path | set .Values.conf.grafana.session "provider_config" }}
+{{- end -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-etc
+type: Opaque
+data:
+  datasources.yaml: {{ include "grafana.utils.generate_datasources" (dict "envAll" $envAll "datasources" .Values.conf.provisioning.datasources) | b64enc }}
+  dashboards.yaml: {{ toYaml .Values.conf.provisioning.dashboards | b64enc }}
+  grafana.ini: {{ include "helm-toolkit.utils.to_ini" .Values.conf.grafana | b64enc }}
+{{ if not (empty .Values.conf.ldap) }}
+{{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.ldap.template "key" "ldap.toml" "format" "Secret") | indent 2 }}
+{{ end }}
+{{ range $key, $value := .Values.conf.dashboards }}
+  {{$key}}.json: {{ toJson $value | b64enc }}
+{{ end }}
+{{- end }}

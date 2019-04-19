@@ -1,0 +1,285 @@
+---
+# Copyright 2018 SUSE LINUX GmbH.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- job:
+    name: openstack-helm-lint
+    run: zuul.d/playbooks/lint.yml
+    nodeset: ubuntu-xenial
+
+- job:
+    name: openstack-helm-infra-functional
+    irrelevant-files:
+      - ^.*\.rst$
+      - ^doc/.*$
+      - ^releasenotes/.*$
+
+- job:
+    name: openstack-helm-infra-linter
+    run: playbooks/zuul-linter.yaml
+    nodeset: openstack-helm-single-node
+
+- job:
+    name: openstack-helm-infra
+    parent: openstack-helm-infra-functional
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-docker.yaml
+      - playbooks/osh-infra-deploy-selenium.yaml
+      - playbooks/osh-infra-build.yaml
+      - playbooks/osh-infra-deploy-k8s.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    vars:
+      gate_scripts:
+        - ./tools/deployment/multinode/010-deploy-docker-registry.sh
+        - ./tools/deployment/multinode/020-ingress.sh
+        - ./tools/deployment/multinode/030-ceph.sh
+        - ./tools/deployment/multinode/035-ceph-ns-activate.sh
+        - ./tools/deployment/multinode/040-ldap.sh
+        - ./tools/deployment/multinode/045-mariadb.sh
+        - ./tools/deployment/multinode/050-prometheus.sh
+        - ./tools/deployment/multinode/060-alertmanager.sh
+        - ./tools/deployment/multinode/070-kube-state-metrics.sh
+        - ./tools/deployment/multinode/080-node-exporter.sh
+        - ./tools/deployment/multinode/085-process-exporter.sh
+        - ./tools/deployment/multinode/090-openstack-exporter.sh
+        - ./tools/deployment/multinode/100-grafana.sh
+        - ./tools/deployment/multinode/110-nagios.sh
+        - ./tools/deployment/multinode/115-radosgw-osh-infra.sh
+        - ./tools/deployment/multinode/120-elasticsearch.sh
+        - ./tools/deployment/multinode/130-fluent-logging.sh
+        - ./tools/deployment/multinode/140-kibana.sh
+        - ./tools/deployment/multinode/grafana-selenium.sh
+        - ./tools/deployment/multinode/nagios-selenium.sh
+        - ./tools/deployment/multinode/prometheus-selenium.sh
+        # NOTE(srwilkers): Add '|| true' until we enable some wait mechanism
+        - ./tools/deployment/multinode/kibana-selenium.sh || true
+
+- job:
+    name: openstack-helm-infra-tenant-ceph
+    parent: openstack-helm-infra-functional
+    nodeset: openstack-helm-five-node-ubuntu
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-docker.yaml
+      - playbooks/osh-infra-deploy-selenium.yaml
+      - playbooks/osh-infra-build.yaml
+      - playbooks/osh-infra-deploy-k8s.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    vars:
+      gate_scripts:
+        - ./tools/deployment/tenant-ceph/010-relabel-nodes.sh
+        - ./tools/deployment/tenant-ceph/020-ingress.sh
+        - ./tools/deployment/tenant-ceph/030-ceph.sh
+        - ./tools/deployment/tenant-ceph/035-ceph-ns-activate.sh
+        - ./tools/deployment/tenant-ceph/040-tenant-ceph.sh
+        - ./tools/deployment/tenant-ceph/045-tenant-ceph-ns-activate.sh
+        - ./tools/deployment/tenant-ceph/050-radosgw-osh-infra.sh
+        - ./tools/deployment/tenant-ceph/060-radosgw-openstack.sh
+
+- job:
+    name: openstack-helm-infra-ubuntu
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-ubuntu
+
+- job:
+    name: openstack-helm-infra-centos
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-centos
+
+- job:
+    name: openstack-helm-infra-fedora
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-fedora
+
+- job:
+    name: openstack-helm-infra-aio-logging
+    parent: openstack-helm-infra-functional
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-selenium.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    nodeset: openstack-helm-single-node
+    vars:
+      gate_scripts:
+        - ./tools/deployment/osh-infra-logging/000-install-packages.sh
+        - ./tools/deployment/osh-infra-logging/005-deploy-k8s.sh
+        - ./tools/deployment/osh-infra-logging/010-ingress.sh
+        - ./tools/deployment/osh-infra-logging/020-ceph.sh
+        - ./tools/deployment/osh-infra-logging/025-ceph-ns-activate.sh
+        - ./tools/deployment/osh-infra-logging/030-radosgw-osh-infra.sh
+        - ./tools/deployment/osh-infra-logging/040-ldap.sh
+        - ./tools/deployment/osh-infra-logging/050-elasticsearch.sh
+        - ./tools/deployment/osh-infra-logging/055-elasticsearch-ldap.sh
+        - ./tools/deployment/osh-infra-logging/060-fluent-logging.sh
+        - ./tools/deployment/osh-infra-logging/070-kibana.sh
+        # NOTE(srwilkers): Add '|| true' until we enable some wait mechanism
+        - ./tools/deployment/osh-infra-logging/kibana-selenium.sh || true
+
+- job:
+    name: openstack-helm-infra-aio-monitoring
+    parent: openstack-helm-infra-functional
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-selenium.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    nodeset: openstack-helm-single-node
+    vars:
+      gate_scripts:
+        - ./tools/deployment/osh-infra-monitoring/000-install-packages.sh
+        - ./tools/deployment/osh-infra-monitoring/005-deploy-k8s.sh
+        - ./tools/deployment/osh-infra-monitoring/010-deploy-docker-registry.sh
+        - ./tools/deployment/osh-infra-monitoring/020-ingress.sh
+        - ./tools/deployment/osh-infra-monitoring/030-nfs-provisioner.sh
+        - ./tools/deployment/osh-infra-monitoring/040-ldap.sh
+        - ./tools/deployment/osh-infra-monitoring/045-mariadb.sh
+        - ./tools/deployment/osh-infra-monitoring/050-prometheus.sh
+        - ./tools/deployment/osh-infra-monitoring/060-alertmanager.sh
+        - ./tools/deployment/osh-infra-monitoring/070-kube-state-metrics.sh
+        - ./tools/deployment/osh-infra-monitoring/080-node-exporter.sh
+        - ./tools/deployment/osh-infra-monitoring/090-process-exporter.sh
+        - ./tools/deployment/osh-infra-monitoring/100-grafana.sh
+        - ./tools/deployment/osh-infra-monitoring/110-nagios.sh
+        - ./tools/deployment/osh-infra-monitoring/grafana-selenium.sh
+        - ./tools/deployment/osh-infra-monitoring/prometheus-selenium.sh
+        - ./tools/deployment/osh-infra-monitoring/nagios-selenium.sh
+
+- job:
+    name: openstack-helm-infra-aio-network-policy
+    parent: openstack-helm-infra-functional
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-selenium.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    nodeset: openstack-helm-single-node
+    vars:
+      gate_scripts:
+        - ./tools/deployment/network-policy/000-install-packages.sh
+        - ./tools/deployment/network-policy/005-deploy-k8s.sh
+        - ./tools/deployment/network-policy/010-ingress.sh
+        - ./tools/deployment/network-policy/020-nfs-provisioner.sh
+        - ./tools/deployment/network-policy/039-lockdown.sh
+        - ./tools/deployment/network-policy/040-ldap.sh
+        - ./tools/deployment/network-policy/045-mariadb.sh
+        - ./tools/deployment/network-policy/050-prometheus.sh
+        - ./tools/deployment/network-policy/060-alertmanager.sh
+        - ./tools/deployment/network-policy/070-kube-state-metrics.sh
+        - ./tools/deployment/network-policy/080-node-exporter.sh
+        - ./tools/deployment/network-policy/090-process-exporter.sh
+        - ./tools/deployment/network-policy/100-grafana.sh
+        - ./tools/deployment/network-policy/110-nagios.sh
+        - ./tools/deployment/network-policy/120-elasticsearch.sh
+        - ./tools/deployment/network-policy/130-fluent-logging.sh
+        - ./tools/deployment/network-policy/140-kibana.sh
+        - ./tools/deployment/network-policy/901-test-networkpolicy.sh
+
+- job:
+    name: openstack-helm-infra-openstack-support
+    parent: openstack-helm-infra-functional
+    timeout: 7200
+    pre-run: playbooks/osh-infra-upgrade-host.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    nodeset: openstack-helm-single-node
+    vars:
+      gate_scripts:
+        - ./tools/deployment/openstack-support/000-install-packages.sh
+        - ./tools/deployment/openstack-support/005-deploy-k8s.sh
+        - ./tools/deployment/openstack-support/010-ingress.sh
+        - ./tools/deployment/openstack-support/020-ceph.sh
+        - ./tools/deployment/openstack-support/025-ceph-ns-activate.sh
+        - ./tools/deployment/openstack-support/030-rabbitmq.sh
+        - ./tools/deployment/openstack-support/040-memcached.sh
+        - ./tools/deployment/openstack-support/050-libvirt.sh
+        - ./tools/deployment/openstack-support/060-openvswitch.sh
+
+- job:
+    name: openstack-helm-infra-five-ubuntu
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-ubuntu
+
+- job:
+    name: openstack-helm-infra-five-centos
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-centos
+
+- job:
+    name: openstack-helm-infra-five-fedora
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-fedora
+
+- job:
+    name: openstack-helm-infra-kubernetes-keystone-auth
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-single-node
+    run: playbooks/osh-infra-gate-runner.yaml
+    required-projects:
+      - openstack/openstack-helm
+    vars:
+      kubernetes_keystone_auth: true
+      gate_fqdn_test: true
+      gate_scripts:
+        - ./tools/deployment/keystone-auth/010-setup-client.sh
+        - ./tools/deployment/keystone-auth/020-ingress.sh
+        - ./tools/deployment/keystone-auth/030-nfs-provisioner.sh
+        - ./tools/deployment/keystone-auth/040-rabbitmq.sh
+        - ./tools/deployment/keystone-auth/050-memcached.sh
+        - ./tools/deployment/keystone-auth/060-mariadb.sh
+        - ./tools/deployment/keystone-auth/070-keystone.sh
+        - ./tools/deployment/keystone-auth/080-check.sh
+
+- job:
+    name: openstack-helm-infra-elastic-beats
+    parent: openstack-helm-infra-functional
+    nodeset: openstack-helm-five-node-ubuntu
+    timeout: 7200
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-docker.yaml
+      - playbooks/osh-infra-build.yaml
+      - playbooks/osh-infra-deploy-k8s.yaml
+    run: playbooks/osh-infra-gate-runner.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    vars:
+      gate_scripts:
+        - ./tools/deployment/elastic-beats/010-deploy-docker-registry.sh
+        - ./tools/deployment/elastic-beats/020-ingress.sh
+        - ./tools/deployment/elastic-beats/030-ceph.sh
+        - ./tools/deployment/elastic-beats/035-ceph-ns-activate.sh
+        - ./tools/deployment/elastic-beats/040-ldap.sh
+        - ./tools/deployment/elastic-beats/050-elasticsearch.sh
+        - ./tools/deployment/elastic-beats/060-elastic-metricbeat.sh
+        - ./tools/deployment/elastic-beats/070-kube-state-metrics.sh
+        - ./tools/deployment/elastic-beats/080-elastic-filebeat.sh
+        - ./tools/deployment/elastic-beats/090-elastic-packetbeat.sh
+        - ./tools/deployment/elastic-beats/100-elastic-apm-server.sh
+        - ./tools/deployment/elastic-beats/110-kibana.sh
+
+- job:
+    name: openstack-helm-infra-airship-divingbell
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-single-node
+    run: playbooks/osh-infra-airship-divingbell-check.yaml
+    required-projects:
+      - openstack/airship-divingbell

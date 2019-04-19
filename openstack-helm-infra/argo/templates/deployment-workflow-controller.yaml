@@ -1,0 +1,91 @@
+{{- if .Values.manifests.deployment_workflow_controller }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo
+  namespace: {{ $.Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-cluster-role
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/exec
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - watch
+      - list
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - create
+      - delete
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+      - workflows/finalizers
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argo-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: argo
+    namespace: {{ $.Release.Namespace }}
+---
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: workflow-controller
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: workflow-controller
+  template:
+    metadata:
+      labels:
+        app: workflow-controller
+    spec:
+      serviceAccountName: argo
+      containers:
+        - name: workflow-controller
+{{ tuple $ "argo_workflow" | include "helm-toolkit.snippets.image" | indent 10 }}
+          command:
+            - workflow-controller
+            - --configmap
+            - workflow-controller-configmap
+            - --executor-image
+            - {{ ( tuple $ "argo_executor" | include "helm-toolkit.snippets.image" | fromYaml ).image }}
+{{- end }}

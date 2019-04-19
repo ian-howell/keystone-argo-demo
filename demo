@@ -1,0 +1,31 @@
+#!/bin/bash
+NODE_NAME=aks-nodepool1-42635952-0
+kubectl label nodes ${NODE_NAME} openstack-control-plane=enabled --overwrite
+
+cd $HOME/openstack-helm-infra
+# git checkout feat/crd
+# 3d1e6b7
+make
+helm install --name argo --namespace argo ./argo
+
+cd $HOME/openstack-helm
+# git checkout feat/keystone-argo-wf
+# e4779be
+./tools/deployment/developer/common/030-ingress.sh
+./tools/deployment/developer/nfs/040-nfs-provisioner.sh
+./tools/deployment/developer/nfs/050-mariadb.sh
+./tools/deployment/developer/nfs/060-rabbitmq.sh
+./tools/deployment/developer/nfs/070-memcached.sh
+
+# # displays
+# watch -n0.2 kubectl get pods -n openstack
+# while true; do clear; argo watch wf-keystone-api -n openstack; sleep 1; done
+# while true; do clear; argo watch wf-keystone-bootstrap -n openstack; sleep 1; done
+# export OS_CLOUD=openstack_helm; while true; clear; do openstack token issue; sleep 1; done
+
+# install keystone
+helm install --name keystone --namespace openstack ./keystone
+# Change keystone ocata images to pike
+# Delete workflows
+kubectl delete wf -n openstack wf-keystone-api wf-keystone-bootstrap
+helm upgrade --install keystone --namespace openstack ./keystone

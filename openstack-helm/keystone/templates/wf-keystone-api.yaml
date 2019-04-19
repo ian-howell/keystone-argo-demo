@@ -1,0 +1,202 @@
+{{- $serviceAccountName := "wf-keystone-sa" }}
+{{ tuple . "wf-keystone" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+# The workflow checks that all the jobs and services required for
+# keystone-api to start are here.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: wf-keystone-api
+  labels:
+    application: keystone
+spec:
+  entrypoint: wf-keystone-api
+  serviceAccountName: wf-keystone-sa
+  volumes:
+  {{- include "keystone.templates.steps._credential_setup.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._db_init.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._db_sync.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._db_backup.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._fernet_setup.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._rabbit_init.volumes" . | nindent 2 }}
+# This DAG describes the "outer" workflow - it drives the flow
+  templates:
+  - name: wf-keystone-api
+    dag:
+      tasks:
+      - name: check-that-memcached-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:memcached"
+      - name: check-that-mariadb-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:mariadb"
+      - name: check-that-rabbitmq-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:rabbitmq"
+      - name: task-keystone-db-exists
+        template: task-keystone-db-exists
+        dependencies:
+          - check-that-mariadb-is-available
+      - name: task-keystone-db-backup
+        template: task-keystone-db-backup
+        arguments:
+          parameters:
+            - name: db-exists
+              value: "{{"{{tasks.task-keystone-db-exists.outputs.result}}"}}"
+        when: "{{"{{tasks.task-keystone-db-exists.outputs.result}} == true"}}"
+        dependencies:
+          - task-keystone-db-exists
+      - name: wf-keystone-db-init
+        template: wf-keystone-db-init
+        dependencies:
+        - check-that-mariadb-is-available
+        - task-keystone-db-backup
+      - name: wf-keystone-rabbit-init
+        template: wf-keystone-rabbit-init
+        dependencies:
+        - check-that-rabbitmq-is-available
+      - name: wf-keystone-db-sync
+        template: wf-keystone-db-sync
+        dependencies:
+        - wf-keystone-db-init
+        - wf-keystone-rabbit-init
+        - task-keystone-credential-setup
+        - task-keystone-fernet-setup
+      - name: task-keystone-credential-setup
+        template: task-keystone-credential-setup
+      - name: task-keystone-fernet-setup
+        template: task-keystone-fernet-setup
+# The following workflows describe the inner nodes of the DAG
+  - name: task-keystone-db-backup
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.db_backup }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.db_backup }}
+    container:
+    {{- include "keystone.templates.steps._db_backup.container" . | nindent 6 }}
+  - name: wf-keystone-rabbit-init
+    steps:
+    - - name: check-that-rabbitmq-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:rabbitmq"
+    - - name: task-keystone-rabbit-init
+        template: task-keystone-rabbit-init
+  - name: wf-keystone-db-init
+    steps:
+    - - name: check-that-mariadb-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:mariadb"
+    - - name: task-keystone-db-init
+        template: task-keystone-db-init
+  - name: wf-keystone-db-sync
+    steps:
+    - - name: check-that-mariadb-is-available
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:mariadb"
+    - - name: task-keystone-db-sync
+        template: task-keystone-db-sync
+# The following tasks describe leaf nodes of the DAG
+  - name: task-keystone-credential-setup
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.credential_setup }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.credential_setup }}
+    container:
+    {{- include "keystone.templates.steps._credential_setup.container" . | nindent 6 }}
+  - name: task-keystone-fernet-setup
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.fernet_setup }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.fernet_setup }}
+    container:
+    {{- include "keystone.templates.steps._fernet_setup.container" . | nindent 6 }}
+  - name: task-keystone-rabbit-init
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.rabbit_init }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.rabbit_init }}
+    container:
+    {{- include "keystone.templates.steps._rabbit_init.container" . | nindent 6 }}
+  - name: task-keystone-db-exists
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.db_exists }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.db_exists }}
+    script:
+      name: "keystone-db-exists-0"
+      image: "docker.io/library/mysql:5.5"
+      imagePullPolicy: "IfNotPresent"
+      env:
+        - name: PATH
+          value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/mysql/bin:/usr/local/mysql/scripts"
+        - name: DB_USER
+          value: {{ .Values.endpoints.oslo_db.auth.admin.username }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.oslo_db.keystone }}
+              key: DB_PASSWORD
+        - name: DB_HOST
+          value: {{ tuple "oslo_db" "default" . | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}
+      command:
+        - /bin/bash
+      source: |
+        if [[ ! -z "`mysql --user=${DB_USER} --password=${DB_PASSWORD} --host=${DB_HOST} -sss -q -e "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'keystone';" 2>&1`" ]]; then
+          echo "true"
+        else
+          echo "false"
+        fi
+  - name: task-keystone-db-init
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.db_init }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.db_init }}
+    container:
+    {{- include "keystone.templates.steps._db_init.container" . | nindent 6 }}
+  - name: task-keystone-db-sync
+    activeDeadlineSeconds: {{ .Values.dependencies.timeout.tasks.db_sync }}
+    retryStrategy:
+      limit: {{ .Values.dependencies.retries.db_sync }}
+    container:
+    {{- include "keystone.templates.steps._db_sync.container" . | nindent 6 }}
+# The templates below this line are utility templates
+  - name: init
+    inputs:
+      parameters:
+      - name: service
+    container:
+      name: "{{"{{inputs.parameters.service}}-init"}}"
+      image: {{ .Values.images.tags.dep_check }}
+      imagePullPolicy: IfNotPresent
+      env:
+      - name: POD_NAME
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.name
+      - name: NAMESPACE
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.namespace
+      - name: PATH
+        value: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/
+      - name: DEPENDENCY_SERVICE
+        value: "{{"{{inputs.parameters.service}}"}}"
+      - name: COMMAND
+        value: "echo done"
+    command:
+      - kubernetes-entrypoint

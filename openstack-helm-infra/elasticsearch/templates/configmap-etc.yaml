@@ -1,0 +1,51 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.configmap_etc }}
+{{- $envAll := . }}
+
+{{- if empty .Values.conf.elasticsearch.config.cloud.aws.access_key -}}
+{{- set .Values.conf.elasticsearch.config.cloud.aws "access_key" .Values.endpoints.ceph_object_store.auth.elasticsearch.access_key -}}
+{{- end -}}
+
+{{- if empty .Values.conf.elasticsearch.config.cloud.aws.secret_key -}}
+{{- set .Values.conf.elasticsearch.config.cloud.aws "secret_key" .Values.endpoints.ceph_object_store.auth.elasticsearch.secret_key -}}
+{{- end -}}
+
+{{- if empty .Values.endpoints.ceph_object_store.path.default -}}
+{{- set .Values.endpoints.ceph_object_store.path "default" .Values.conf.elasticsearch.snapshots.bucket -}}
+{{- end -}}
+
+{{- if empty .Values.conf.elasticsearch.config.cloud.aws.s3.endpoint -}}
+{{- $radosgw_host := tuple "ceph_object_store" "internal" "api" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" -}}
+{{- $bucket_path := tuple "ceph_object_store" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" -}}
+{{- $s3_endpoint := printf "%s/%s" $radosgw_host $bucket_path -}}
+{{- set .Values.conf.elasticsearch.config.cloud.aws.s3 "endpoint" $s3_endpoint -}}
+{{- end -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: elasticsearch-etc
+type: Opaque
+data:
+  elasticsearch.yml: {{ toYaml .Values.conf.elasticsearch.config | b64enc }}
+  action_file.yml: {{ toYaml .Values.conf.curator.action_file | b64enc }}
+  config.yml: {{ toYaml .Values.conf.curator.config | b64enc }}
+#NOTE(portdirect): this must be last, to work round helm ~2.7 bug.
+{{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.httpd "key" "httpd.conf" "format" "Secret") | indent 2 }}
+{{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.log4j2 "key" "log4j2.properties" "format" "Secret") | indent 2 }}
+{{- end }}

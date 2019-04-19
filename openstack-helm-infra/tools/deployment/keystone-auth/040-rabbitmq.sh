@@ -1,0 +1,1 @@
+../openstack-support/030-rabbitmq.sh

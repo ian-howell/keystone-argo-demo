@@ -1,0 +1,42 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+  name: wf-keystone-role
+rules:
+  - apiGroups:
+      - ""
+      - extensions
+      - batch
+      - apps
+      - argoproj.io
+    resources:
+      - secrets
+      - services
+      - endpoints
+      - jobs
+      - pods
+      - workflows
+      - workflows/finalizers
+    verbs:
+      - create
+      - delete
+      - deletecollection
+      - get
+      - list
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wf-keystone-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: wf-keystone-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: wf-keystone-role

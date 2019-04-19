@@ -1,0 +1,31 @@
+{{- define "keystone.templates.steps._image_repo_sync.container" -}}
+          name: image-repo-sync
+          image: "docker.io/docker:17.07.0"
+          imagePullPolicy: IfNotPresent
+
+          env:
+            - name: LOCAL_REPO
+              value: "localhost:5000"
+            - name: IMAGE_SYNC_LIST
+              value: "docker.io/openstackhelm/heat:ocata,docker.io/openstackhelm/heat:ocata,docker.io/openstackhelm/heat:ocata,,,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/keystone:ocata,docker.io/openstackhelm/heat:ocata,docker.io/rabbitmq:3.7-management,docker.io/xrally/xrally-openstack:1.3.0"
+          command:
+            - /tmp/image-repo-sync.sh
+          volumeMounts:
+            - name: bootstrap-sh
+              mountPath: /tmp/image-repo-sync.sh
+              subPath: image-repo-sync.sh
+              readOnly: true
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
+{{- end }}
+
+{{- define "keystone.templates.steps._image_repo_sync.volumes" -}}
+        - name: bootstrap-sh
+          configMap:
+            name: "keystone-bin"
+            defaultMode: 0555
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+{{- end }}
+

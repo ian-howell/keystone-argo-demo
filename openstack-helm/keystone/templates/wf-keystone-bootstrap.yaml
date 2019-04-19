@@ -1,0 +1,78 @@
+# The workflow checks that all the jobs and services required for
+# boostrap to start are here.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: wf-keystone-bootstrap
+spec:
+  entrypoint: wf-keystone-bootstrap
+  serviceAccountName: wf-keystone-sa
+  volumes:
+  {{- include "keystone.templates.steps._bootstrap.volumes" . | nindent 2 }}
+  {{- include "keystone.templates.steps._domain_manage.volumes" . | nindent 2 }}
+# This DAG describes the "outer" workflow - it drives the flow
+  templates:
+  - name: wf-keystone-bootstrap
+    dag:
+      tasks:
+      - name: svc-keystone
+        template: init
+        arguments:
+          parameters:
+          - name: service
+            value: "{{ .Release.Namespace }}:keystone-api"
+      - name: wf-domain-manage
+        template: wf-domain-manage
+        dependencies:
+        - svc-keystone
+      - name: task-bootstrap
+        template: task-bootstrap
+        dependencies:
+        - svc-keystone
+        - wf-domain-manage
+# The following workflows describe the inner nodes of the DAG
+  - name: wf-domain-manage
+    steps:
+    - - name: task-domain-manage-init
+        template: task-domain-manage-init
+    - - name: task-domain-manage
+        template: task-domain-manage
+# The following tasks describe leaf nodes of the DAG
+  - name: task-domain-manage-init
+    container:
+    {{- include "keystone.templates.steps._domain_manage.init" . | nindent 6 }}
+  - name: task-domain-manage
+    container:
+    {{- include "keystone.templates.steps._domain_manage.container" . | nindent 6 }}
+  - name: task-bootstrap
+    container:
+    {{- include "keystone.templates.steps._bootstrap.container" . | nindent 6 }}
+# The templates below this line are utility templates
+  - name: init
+    inputs:
+      parameters:
+      - name: service
+    container:
+      name: "{{"{{inputs.parameters.service}}-init"}}"
+      image: {{ .Values.images.tags.dep_check }}
+      imagePullPolicy: IfNotPresent
+      env:
+      - name: POD_NAME
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.name
+      - name: NAMESPACE
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.namespace
+      - name: PATH
+        value: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/
+      - name: DEPENDENCY_SERVICE
+        value: "{{"{{inputs.parameters.service}}"}}"
+      - name: COMMAND
+        value: "echo done"
+    command:
+      - kubernetes-entrypoint

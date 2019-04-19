@@ -1,0 +1,7 @@
+{{- if .Values.manifests.configmap_workflow_controller_configmap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-controller-configmap
+  namespace: {{ $.Release.Namespace }}
+{{- end }}

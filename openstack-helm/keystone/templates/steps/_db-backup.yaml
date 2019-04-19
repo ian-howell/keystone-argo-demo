@@ -1,0 +1,54 @@
+{{- define "keystone.templates.steps._db_backup.container" -}}
+name: "keystone-db-backup-0"
+image: "docker.io/library/mysql:5.5"
+imagePullPolicy: "IfNotPresent"
+
+env:
+  - name: PATH
+    value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/mysql/bin:/usr/local/mysql/scripts"
+  - name: DB_USER
+    value: {{ .Values.endpoints.oslo_db.auth.admin.username }}
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: {{ .Values.secrets.oslo_db.keystone }}
+        key: DB_PASSWORD
+  - name: DB_HOST
+    value: {{ tuple "oslo_db" "default" . | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}
+
+command:
+  - /tmp/db-backup.sh
+volumeMounts:
+  - name: db-backup-sh
+    mountPath: /tmp/db-backup.sh
+    subPath: db-backup.sh
+    readOnly: true
+  - name: etc-service
+    mountPath: "/etc/keystone"
+  - name: db-backup-conf
+    mountPath: "/etc/keystone/keystone.conf"
+    subPath: "keystone.conf"
+    readOnly: true
+  - name: db-backup-conf
+    mountPath: "/etc/keystone/logging.conf"
+    subPath: "logging.conf"
+    readOnly: true
+  - mountPath: "/etc/keystone/backups"
+    name: keystone-db-backup
+{{- end }}
+
+{{- define "keystone.templates.steps._db_backup.volumes" -}}
+- name: db-backup-sh
+  configMap:
+    name: "keystone-bin"
+    defaultMode: 0555
+- name: etc-service
+  emptyDir: {}
+- name: db-backup-conf
+  secret:
+    secretName: "keystone-etc"
+    defaultMode: 0444
+- name: keystone-db-backup
+  persistentVolumeClaim:
+    claimName: keystone-db-backup-claim
+{{- end }}
